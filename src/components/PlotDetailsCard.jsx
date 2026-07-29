@@ -128,12 +128,12 @@ export default function PlotDetailsCard({
                 >
                   <td>
                     <span className={`point-badge ${verifiedPoints.has(idx) ? 'verified' : ''}`}>
-                      {pt.sno}
+                      {pt.sno || idx + 1}
                     </span>
                   </td>
-                  <td>{pt.lat.toFixed(8)}</td>
-                  <td>{pt.lon.toFixed(8)}</td>
-                  <td>{pt.distance > 0 ? pt.distance.toFixed(2) : '—'}</td>
+                  <td>{typeof pt.lat === 'number' ? pt.lat.toFixed(6) : (pt.lat || '—')}</td>
+                  <td>{typeof pt.lon === 'number' ? pt.lon.toFixed(6) : (pt.lon || '—')}</td>
+                  <td>{typeof pt.distance === 'number' && pt.distance > 0 ? pt.distance.toFixed(2) : '—'}</td>
                   <td style={{ color: 'var(--accent-purple)', fontWeight: 600 }}>{pt.sideLp || '—'}</td>
                 </tr>
               ))}

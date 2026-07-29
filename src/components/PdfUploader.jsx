@@ -24,6 +24,13 @@ export default function PdfUploader({ onUpload, onLoadPreset, dataSource }) {
     }
   };
 
+  const handleClear = (e) => {
+    e.stopPropagation();
+    setFileName(null);
+    if (inputRef.current) inputRef.current.value = '';
+    onLoadPreset();
+  };
+
   return (
     <div className="card">
       <div className="card-header">
@@ -39,36 +46,53 @@ export default function PdfUploader({ onUpload, onLoadPreset, dataSource }) {
           background: dataSource === 'preset' ? 'rgba(56, 189, 248, 0.12)' : 'rgba(74, 222, 128, 0.12)',
           color: dataSource === 'preset' ? 'var(--accent-blue)' : 'var(--accent-green)',
         }}>
-          {dataSource === 'preset' ? '📐 PRESET' : '📄 UPLOADED'}
+          {dataSource === 'preset' ? '📐 PRESET REPOR' : '📄 CUSTOM PDF'}
         </span>
       </div>
       <div className="card-body">
-        {/* Quick preset toggle */}
+        {/* Quick preset button */}
         <button
           className="btn"
           onClick={onLoadPreset}
-          style={{ width: '100%', justifyContent: 'center', marginBottom: 10 }}
+          style={{
+            width: '100%',
+            justify: 'center',
+            marginBottom: 12,
+            border: dataSource === 'preset' ? '1px solid var(--accent-blue)' : '1px solid var(--border-glass)',
+            background: dataSource === 'preset' ? 'rgba(56, 189, 248, 0.08)' : 'transparent'
+          }}
         >
           <MapPin size={14} />
-          Load SinglePlotRepor.pdf (Plot 368, Chittoor)
+          Use Demo Preset (Plot 368, Chittoor)
         </button>
 
         {/* Dropzone */}
         <div
           className={`dropzone ${dragOver ? 'drag-over' : ''}`}
+          style={{
+            borderColor: dataSource === 'uploaded' ? 'var(--accent-green)' : undefined,
+            background: dataSource === 'uploaded' ? 'rgba(74, 222, 128, 0.04)' : undefined,
+          }}
           onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
           onDragLeave={() => setDragOver(false)}
           onDrop={handleDrop}
           onClick={() => inputRef.current?.click()}
         >
-          <div className="dropzone-icon">📄</div>
+          <div className="dropzone-icon">{dataSource === 'uploaded' ? '✅' : '📄'}</div>
           <div className="dropzone-text">
-            <strong>Drop FMB PDF here</strong><br />
-            or click to browse
+            <strong>{dataSource === 'uploaded' ? 'New PDF Loaded & Rendered!' : 'Upload New Survey PDF'}</strong><br />
+            {dataSource === 'uploaded' ? 'Click or drop another file to switch' : 'Drag and drop or click to browse'}
           </div>
           {fileName && (
-            <div style={{ marginTop: 8, fontSize: 11, color: 'var(--accent-green)', display: 'flex', alignItems: 'center', gap: 4, justifyContent: 'center' }}>
+            <div style={{ marginTop: 8, fontSize: 11, color: 'var(--accent-green)', display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'center' }}>
               <FileText size={12} /> {fileName}
+              <button
+                onClick={handleClear}
+                style={{ background: 'none', border: 'none', color: '#f87171', cursor: 'pointer', fontSize: 12, padding: '0 4px' }}
+                title="Reset to preset"
+              >
+                ✕
+              </button>
             </div>
           )}
         </div>

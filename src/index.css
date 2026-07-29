@@ -395,6 +395,13 @@ body {
   background: var(--bg-primary);
 }
 
+/* Sub-meter satellite tile contrast & sharpness enhancement */
+.leaflet-tile-container img {
+  image-rendering: -webkit-optimize-contrast;
+  image-rendering: crisp-edges;
+  filter: contrast(108%) brightness(102%) saturate(105%);
+}
+
 /* ===== MAP OVERLAY CARDS ===== */
 .map-overlay {
   position: absolute;

@@ -20,8 +20,15 @@ export default function FieldSurveyCreator({
       if (onStartGps && !gpsActive) {
         onStartGps();
       }
-      alert('Activating Live GPS... Once your location updates, click "Capture GPS Corner Point" again or use the Simulator.');
+      alert('Activating Live High-Precision GPS... Once your location updates, click "Capture GPS Corner Peg" again.');
       return;
+    }
+
+    const accuracy = userPosition.accuracy || 5;
+    if (accuracy > 10) {
+      if (!confirm(`⚠️ GPS Accuracy is currently ±${accuracy.toFixed(1)}m. For 99%+ land survey precision, please wait a moment for satellite lock to stabilize under open sky.\n\nDo you still want to record this point?`)) {
+        return;
+      }
     }
 
     const sno = capturedPoints.length + 1;
@@ -39,6 +46,7 @@ export default function FieldSurveyCreator({
       northing: Math.round(userPosition.lat * 10000) / 10,
       distance: Math.round(dist * 100) / 100,
       sideLp: `Side ${sno}`,
+      accuracy: userPosition.accuracy || 2,
     };
 
     setCapturedPoints([...capturedPoints, newPt]);

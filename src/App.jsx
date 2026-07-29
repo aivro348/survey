@@ -46,6 +46,8 @@ export default function App() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [exporterOpen, setExporterOpen] = useState(false);
   const [mapLayer, setMapLayer] = useState('satellite');
+  const [showCadGrid, setShowCadGrid] = useState(true);
+  const [showNodes, setShowNodes] = useState(true);
 
   // GPS Watch Ref
   const watchIdRef = useRef(null);
@@ -134,9 +136,34 @@ export default function App() {
       navigator.geolocation.clearWatch(watchIdRef.current);
       watchIdRef.current = null;
     }
+    
     const c = polygonCentroid(activePoints.length > 0 ? activePoints : plotData.points);
-    simPositionRef.current = { lat: c.lat, lon: c.lon };
-    setUserPosition({ lat: c.lat, lon: c.lon, accuracy: 2, heading: 0 });
+    const fallbackLoc = { lat: c.lat - 0.0001, lon: c.lon - 0.0001, accuracy: 2, heading: 45 };
+
+    // Try to get real GPS location first to initialize simulation at real-world coordinates
+    if (navigator.geolocation) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          const realLoc = {
+            lat: pos.coords.latitude,
+            lon: pos.coords.longitude,
+            accuracy: pos.coords.accuracy || 2,
+            heading: pos.coords.heading ?? 0
+          };
+          simPositionRef.current = { lat: realLoc.lat, lon: realLoc.lon };
+          setUserPosition(realLoc);
+        },
+        () => {
+          // Fallback to plot centroid if real location fails
+          simPositionRef.current = { lat: fallbackLoc.lat, lon: fallbackLoc.lon };
+          setUserPosition(fallbackLoc);
+        },
+        { enableHighAccuracy: true, timeout: 5000 }
+      );
+    } else {
+      simPositionRef.current = { lat: fallbackLoc.lat, lon: fallbackLoc.lon };
+      setUserPosition(fallbackLoc);
+    }
   }, [activePoints, plotData.points]);
 
   const stopSimulator = useCallback(() => {
@@ -237,7 +264,7 @@ export default function App() {
       setVerifiedPoints(new Set());
       setAppMode('inspect');
     } else {
-      alert('Could not extract coordinates from this PDF. Try uploading a different FMB report or use the preset data.');
+      alert(`⚠️ Could not extract digital coordinates from "${file.name}".\n\nPossible Reason: This PDF appears to be a scanned image or drawing without embedded text tables.\n\nTip: You can use "Live Field Mapper" mode to manually place nodes on the satellite map or upload a digital FMB report PDF.`);
     }
   }, []);
 
@@ -346,10 +373,10 @@ export default function App() {
           <button className="btn btn-icon" onClick={() => setSidebarOpen(!sidebarOpen)} style={{ display: 'none' }} id="menu-toggle">
             {sidebarOpen ? <X size={16} /> : <Menu size={16} />}
           </button>
-          <div className="navbar-logo">📐</div>
+          <div className="navbar-logo" style={{ background: 'var(--gradient-success)' }}>🏛️</div>
           <div>
-            <div className="navbar-title">FMB Land Survey Navigator</div>
-            <div className="navbar-subtitle">High-Precision GPS Ground Truthing & Field Mapper</div>
+            <div className="navbar-title" style={{ fontSize: 17, letterSpacing: '-0.2px' }}>Charan Land Survey & Field Navigator</div>
+            <div className="navbar-subtitle">High-Precision GPS Ground Truthing & Field Surveyor</div>
           </div>
         </div>
 
@@ -438,28 +465,22 @@ export default function App() {
             centroid={centroid}
             onSelectPoint={selectTargetPoint}
             onMapClick={handleMapClick}
+            showCadGrid={showCadGrid}
+            showNodes={showNodes}
           />
 
-          {/* Layer Switcher Overlay */}
+          {/* Layer Switcher & Feature Overlay Controls */}
           <div className="map-overlay top-left">
             <div className="layer-switcher">
-              <button className={`layer-btn ${mapLayer === 'satellite' ? 'active' : ''}`} onClick={() => setMapLayer('satellite')}>
-                🛰️ Esri Sat
+              <div style={{ padding: '6px 12px', fontSize: 11, fontWeight: 600, color: 'var(--accent-cyan)', display: 'flex', alignItems: 'center', gap: 6 }}>
+                🛰️ Esri Latest HD Satellite (30cm)
+              </div>
+              <div style={{ height: 16, width: 1, background: 'rgba(255,255,255,0.2)', margin: '0 4px' }} />
+              <button className={`layer-btn ${showCadGrid ? 'active' : ''}`} onClick={() => setShowCadGrid(!showCadGrid)}>
+                📐 CAD Grid
               </button>
-              <button className={`layer-btn ${mapLayer === 'esri_clarity' ? 'active' : ''}`} onClick={() => setMapLayer('esri_clarity')}>
-                ✨ Clarity
-              </button>
-              <button className={`layer-btn ${mapLayer === 'google_sat' ? 'active' : ''}`} onClick={() => setMapLayer('google_sat')}>
-                🌏 Google Sat
-              </button>
-              <button className={`layer-btn ${mapLayer === 'google_hybrid' ? 'active' : ''}`} onClick={() => setMapLayer('google_hybrid')}>
-                🗺️ Hybrid
-              </button>
-              <button className={`layer-btn ${mapLayer === 'osm' ? 'active' : ''}`} onClick={() => setMapLayer('osm')}>
-                Street
-              </button>
-              <button className={`layer-btn ${mapLayer === 'dark' ? 'active' : ''}`} onClick={() => setMapLayer('dark')}>
-                Dark
+              <button className={`layer-btn ${showNodes ? 'active' : ''}`} onClick={() => setShowNodes(!showNodes)}>
+                📍 Nodes
               </button>
             </div>
           </div>

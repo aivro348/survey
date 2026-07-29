@@ -61,32 +61,108 @@ export async function parseFMBPdf(file) {
     for (let i = 1; i <= pdf.numPages; i++) {
       const page = await pdf.getPage(i);
       const textContent = await page.getTextContent();
-      // Join with newlines based on item y position or space
-      const pageText = textContent.items.map(item => item.str).join(' ');
-      fullText += pageText + '\n';
+      
+      // Sort items by Y descending (top-to-bottom), then X ascending (left-to-right)
+      const items = textContent.items.map(item => ({
+        str: item.str,
+        x: item.transform[4],
+        y: Math.round(item.transform[5] / 4) * 4, // Group within 4px line tolerance
+      }));
+
+      items.sort((a, b) => b.y - a.y || a.x - b.x);
+
+      // Group items into lines
+      let currentY = null;
+      let lineText = '';
+      for (const item of items) {
+        if (currentY === null || Math.abs(item.y - currentY) > 3) {
+          if (lineText) fullText += lineText + '\n';
+          currentY = item.y;
+          lineText = item.str;
+        } else {
+          lineText += ' ' + item.str;
+        }
+      }
+      if (lineText) fullText += lineText + '\n';
     }
 
-    // Check if uploaded file is the reference SinglePlotRepor.pdf
-    if (file.name && file.name.toLowerCase().includes('singleplotrepor')) {
-      return REFERENCE_PLOT_DATA;
-    }
-
-    const parsed = extractDataFromText(fullText);
+    let parsed = extractDataFromText(fullText);
+    
+    // If digital text stream yielded 0 points, attempt canvas OCR via Tesseract.js
     if (parsed.points.length === 0) {
-      // If pdfjs text stream was empty or OCR canvas, fallback to reference plot data if survey 368
-      if (fullText.includes('368') || fullText.includes('74R0V0DBCYAGH0')) {
-        return REFERENCE_PLOT_DATA;
+      try {
+        console.log('Attempting OCR scan on image PDF page...');
+        const Tesseract = await import('tesseract.js');
+        const firstPage = await pdf.getPage(1);
+        const viewport = firstPage.getViewport({ scale: 2.0 });
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+
+        await firstPage.render({ canvasContext: context, viewport }).promise;
+        const imgDataUrl = canvas.toDataURL('image/png');
+
+        const ocrResult = await Tesseract.recognize(imgDataUrl, 'eng');
+        const ocrText = ocrResult.data.text;
+        parsed = extractDataFromText(ocrText);
+      } catch (ocrErr) {
+        console.warn('OCR rendering unavailable or failed:', ocrErr);
       }
     }
+    
+    // Set file name in metadata
+    parsed.metadata.fileName = file.name;
+    
     return parsed;
   } catch (err) {
     console.error('PDF parsing failed:', err);
-    // If PDF parsing encounters an error, fallback to reference plot data if filename matches
-    if (file.name && file.name.toLowerCase().includes('singleplotrepor')) {
-      return REFERENCE_PLOT_DATA;
-    }
     return null;
   }
+}
+
+/**
+ * Convert UTM coordinates (Zone 44N, EPSG:32644) to WGS84 Lat/Lon
+ * Standard geodetic ellipsoid conversion algorithm
+ */
+function utmToLatLon(easting, northing, zone = 44, northernHemisphere = true) {
+  const a = 6378137.0; // WGS84 equatorial radius
+  const f = 1 / 298.257223563; // WGS84 flattening
+  const k0 = 0.9996;
+  const e = Math.sqrt(2 * f - f * f);
+  const e1sq = (e * e) / (1 - e * e);
+
+  const x = easting - 500000.0; // remove false easting
+  const y = northernHemisphere ? northing : northing - 10000000.0;
+
+  const longOrigin = (zone - 1) * 6 - 180 + 3; // central meridian
+
+  const M = y / k0;
+  const mu = M / (a * (1 - (e * e) / 4 - (3 * e * e * e * e) / 64 - (5 * e * e * e * e * e * e) / 256));
+
+  const phi1Rad = mu +
+    (3 * e1sq / 2 - 27 * Math.pow(e1sq, 3) / 32) * Math.sin(2 * mu) +
+    (21 * Math.pow(e1sq, 2) / 16 - 55 * Math.pow(e1sq, 4) / 32) * Math.sin(4 * mu) +
+    (151 * Math.pow(e1sq, 3) / 96) * Math.sin(6 * mu);
+
+  const N1 = a / Math.sqrt(1 - e * e * Math.sin(phi1Rad) * Math.sin(phi1Rad));
+  const T1 = Math.tan(phi1Rad) * Math.tan(phi1Rad);
+  const C1 = e1sq * Math.cos(phi1Rad) * Math.cos(phi1Rad);
+  const R1 = a * (1 - e * e) / Math.pow(1 - e * e * Math.sin(phi1Rad) * Math.sin(phi1Rad), 1.5);
+  const D = x / (N1 * k0);
+
+  let lat = phi1Rad - (N1 * Math.tan(phi1Rad) / R1) * (
+    (D * D) / 2 -
+    (5 + 3 * T1 + 10 * C1 - 4 * C1 * C1 - 9 * e1sq) * Math.pow(D, 4) / 24 +
+    (61 + 90 * T1 + 298 * C1 + 45 * T1 * T1 - 252 * e1sq - 3 * C1 * C1) * Math.pow(D, 6) / 720
+  );
+  lat = (lat * 180.0) / Math.PI;
+
+  let lon = (D - (1 + 2 * T1 + C1) * Math.pow(D, 3) / 6 +
+    (5 - 2 * C1 + 28 * T1 - 3 * C1 * C1 + 8 * e1sq + 24 * T1 * T1) * Math.pow(D, 5) / 120) / Math.cos(phi1Rad);
+  lon = longOrigin + (lon * 180.0) / Math.PI;
+
+  return { lat, lon };
 }
 
 /**
@@ -99,13 +175,13 @@ function extractDataFromText(text) {
     projection: 'UTM zone 44N',
   };
 
-  // Extract metadata fields using regex
+  // Extract metadata fields using robust regex
   const patterns = {
-    district: /(?:District|జిల్లా)\s*[:\-]?\s*([A-Za-z0-9\s]+)/i,
-    mandal: /(?:Mandal|మండలం)\s*[:\-]?\s*([A-Za-z0-9\s]+)/i,
-    village: /(?:Village|గ్రామము పేరు)\s*[:\-]?\s*([A-Za-z0-9\s]+)/i,
-    villageCode: /(?:Village Code|గ్రామము కోడ్)\s*[:\-]?\s*(\d+)/i,
-    surveyNo: /(?:Survey|Sy|పటము)\s*(?:No|Number)?\s*[:\-]?\s*(\d+)/i,
+    district: /(?:District|జిల్లా|Dist)\s*[:\-]?\s*([A-Za-z0-9\s]+)/i,
+    mandal: /(?:Mandal|మండలం|Tehsil)\s*[:\-]?\s*([A-Za-z0-9\s]+)/i,
+    village: /(?:Village|గ్రామము|Gram)\s*(?:Name)?\s*[:\-]?\s*([A-Za-z0-9\s]+)/i,
+    villageCode: /(?:Village Code|గ్రామము కోడ్|LGD Code)\s*[:\-]?\s*(\d+)/i,
+    surveyNo: /(?:Survey|Sy|పటము)\s*(?:No|Number|\/)?\s*[:\-]?\s*([0-Za-z0-9\-\/]+)/i,
     ulpin: /(?:ULPIN|సంఖ్య)\s*[:\-]?\s*([A-Z0-9]+)/i,
     extent: /(?:Extent|విస్తీర్ణము)\s*[:\-]?\s*([\d.]+\s*(?:Cents|Hectares|Acres|సెంట్లు))/i,
     datum: /Datum\s*[:\-]?\s*(\S+)/i,
@@ -118,38 +194,97 @@ function extractDataFromText(text) {
     if (match) metadata[key] = match[1].trim();
   }
 
-  // Strategy 1: Line-scoped pattern for: SNo Latitude Longitude Easting Northing Distance SideLP
-  // Uses [^\n\r]* instead of greedy [A-Za-z0-9\s]* to avoid eating multiple lines!
   const points = [];
-  const coordLinePattern = /(\d{1,2})\s+([\d]{1,2}\.[\d]{4,})\s+([\d]{2}\.[\d]{4,})\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*([^\n\r]*)/g;
-  let match;
+  const lines = text.split('\n');
 
-  while ((match = coordLinePattern.exec(text)) !== null) {
-    const lat = parseFloat(match[2]);
-    const lon = parseFloat(match[3]);
+  // Strategy 1: Line-by-line inspection matching SNo, Lat (12-13.x or 6-37.x), Lon (78-79.x or 68-98.x), Easting, Northing, Distance, SideLP
+  for (const line of lines) {
+    const lineTrim = line.trim();
+    if (!lineTrim) continue;
 
-    if (lat >= 6 && lat <= 37 && lon >= 68 && lon <= 98) {
+    // Pattern for: [SNo] [Lat] [Lon] [Easting] [Northing] [Distance] [SideLP]
+    const rowMatch = lineTrim.match(/^(\d{1,2})\s+([0-3]?\d\.\d{4,})\s+([6-9]\d\.\d{4,})\s+([\d.]+)\s+([\d.]+)\s+([\d.]+)\s*(.*)$/);
+    if (rowMatch) {
+      const lat = parseFloat(rowMatch[2]);
+      const lon = parseFloat(rowMatch[3]);
+      if (lat >= 6 && lat <= 37 && lon >= 68 && lon <= 98) {
+        points.push({
+          sno: parseInt(rowMatch[1]),
+          lat,
+          lon,
+          easting: parseFloat(rowMatch[4]),
+          northing: parseFloat(rowMatch[5]),
+          distance: parseFloat(rowMatch[6]),
+          sideLp: rowMatch[7]?.trim() || '',
+        });
+      }
+    }
+  }
+
+  // Strategy 2: Global scan for Lat (e.g. 12.86xxxx) and Lon (e.g. 78.40xxxx) in table text stream
+  if (points.length === 0) {
+    const globalPairPattern = /(\d{1,2})\s+([0-3]?\d\.\d{5,})\s+([6-9]\d\.\d{5,})(?:\s+([\d.]+))?(?:\s+([\d.]+))?(?:\s+([\d.]+))?\s*([^\n\r]*)/g;
+    let match;
+    while ((match = globalPairPattern.exec(text)) !== null) {
+      const lat = parseFloat(match[2]);
+      const lon = parseFloat(match[3]);
+      if (lat >= 6 && lat <= 37 && lon >= 68 && lon <= 98) {
+        points.push({
+          sno: parseInt(match[1]),
+          lat,
+          lon,
+          easting: match[4] ? parseFloat(match[4]) : 0,
+          northing: match[5] ? parseFloat(match[5]) : 0,
+          distance: match[6] ? parseFloat(match[6]) : 0,
+          sideLp: match[7]?.trim() || '',
+        });
+      }
+    }
+  }
+
+  // Strategy 3: Extract isolated valid Lat/Lon floats if columns were merged into a continuous string
+  if (points.length === 0) {
+    const latRegex = /([0-3]?\d\.\d{5,})/g;
+    const lonRegex = /([6-9]\d\.\d{5,})/g;
+    const lats = Array.from(text.matchAll(latRegex), m => parseFloat(m[1])).filter(v => v >= 6 && v <= 37);
+    const lons = Array.from(text.matchAll(lonRegex), m => parseFloat(m[1])).filter(v => v >= 68 && v <= 98);
+
+    const minLen = Math.min(lats.length, lons.length);
+    for (let i = 0; i < minLen; i++) {
       points.push({
-        sno: parseInt(match[1]),
-        lat,
-        lon,
-        easting: parseFloat(match[4]),
-        northing: parseFloat(match[5]),
-        distance: parseFloat(match[6]),
-        sideLp: match[7]?.trim() || '',
+        sno: i + 1,
+        lat: lats[i],
+        lon: lons[i],
+        easting: 0,
+        northing: 0,
+        distance: 0,
+        sideLp: `Point ${i + 1}`,
       });
     }
   }
 
-  // Strategy 2: Simple Lat/Lon pairs if table structure is split across lines
+  // Strategy 4: UTM Coordinate Table conversion fallback
   if (points.length === 0) {
-    const simplePattern = /([\d]{1,2}\.[\d]{5,})\s+([\d]{2}\.[\d]{5,})/g;
+    const utmPattern = /(\d{1,2})\s+([1-8]\d{5}(?:\.\d+)?)\s+([1-3]\d{6}(?:\.\d+)?)(?:\s+([\d.]+))?\s*([^\n\r]*)/g;
+    let match;
     let idx = 1;
-    while ((match = simplePattern.exec(text)) !== null) {
-      const lat = parseFloat(match[1]);
-      const lon = parseFloat(match[2]);
+    while ((match = utmPattern.exec(text)) !== null) {
+      const easting = parseFloat(match[2]);
+      const northing = parseFloat(match[3]);
+      const distance = match[4] ? parseFloat(match[4]) : 0;
+      const sideLp = match[5]?.trim() || '';
+
+      const { lat, lon } = utmToLatLon(easting, northing, 44, true);
       if (lat >= 6 && lat <= 37 && lon >= 68 && lon <= 98) {
-        points.push({ sno: idx++, lat, lon, easting: 0, northing: 0, distance: 0, sideLp: '' });
+        points.push({
+          sno: parseInt(match[1]) || idx++,
+          lat,
+          lon,
+          easting,
+          northing,
+          distance,
+          sideLp,
+        });
       }
     }
   }

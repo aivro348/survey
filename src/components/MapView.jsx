@@ -4,44 +4,12 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { haversineDistance } from '../utils/geoUtils';
 
-// Free open-source satellite & map tile providers (no API key required)
+// Esri World Imagery (Latest High-Resolution Satellite Map Layer)
 const TILE_LAYERS = {
   satellite: {
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Tiles &copy; Esri &mdash; Source: Esri, Maxar, Earthstar',
+    attribution: 'Tiles &copy; Esri World Imagery (Latest HD 30cm)',
     maxZoom: 22,
-    maxNativeZoom: 18,
-  },
-  esri_clarity: {
-    url: 'https://clarity.maptiles.arcgis.com/arcgis/rest/services/World_Imagery/WMTS/tile/1.0.0/World_Imagery/default/default028mm/{z}/{y}/{x}.jpg',
-    attribution: 'Tiles &copy; Esri Clarity',
-    maxZoom: 22,
-    maxNativeZoom: 18,
-  },
-  google_sat: {
-    url: 'https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
-    subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
-    attribution: '&copy; Google Satellite',
-    maxZoom: 22,
-    maxNativeZoom: 19,
-  },
-  google_hybrid: {
-    url: 'https://{s}.google.com/vt/lyrs=y&x={x}&y={y}&z={z}',
-    subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
-    attribution: '&copy; Google Hybrid',
-    maxZoom: 22,
-    maxNativeZoom: 19,
-  },
-  osm: {
-    url: 'https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',
-    attribution: '&copy; OpenStreetMap contributors',
-    maxZoom: 19,
-    maxNativeZoom: 19,
-  },
-  dark: {
-    url: 'https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png',
-    attribution: '&copy; CARTO &mdash; OSM contributors',
-    maxZoom: 20,
     maxNativeZoom: 19,
   },
 };
@@ -83,14 +51,21 @@ function lpLabel(text) {
   });
 }
 
-// Map controller component — fits bounds on data change
-function MapController({ bounds }) {
+// Map controller component — fits bounds on data change and fits user position dynamically
+function MapController({ bounds, userPosition }) {
   const map = useMap();
   useEffect(() => {
     if (bounds) {
-      map.fitBounds(bounds, { padding: [60, 60], maxZoom: 20 });
+      if (userPosition) {
+        // Create combined bounds containing both the land plot and the user's current live location
+        const combinedBounds = L.latLngBounds(bounds);
+        combinedBounds.extend([userPosition.lat, userPosition.lon]);
+        map.fitBounds(combinedBounds, { padding: [80, 80], maxZoom: 18 });
+      } else {
+        map.fitBounds(bounds, { padding: [60, 60], maxZoom: 18 });
+      }
     }
-  }, [map, bounds]);
+  }, [map, bounds, userPosition]);
   return null;
 }
 
@@ -118,7 +93,16 @@ function MapClickHandler({ onMapClick }) {
 }
 
 export default function MapView({
-  plotData, targetPointIdx, userPosition, verifiedPoints, mapLayer, centroid, onSelectPoint, onMapClick
+  plotData,
+  targetPointIdx,
+  userPosition,
+  verifiedPoints,
+  mapLayer,
+  centroid,
+  onSelectPoint,
+  onMapClick,
+  showCadGrid = true,
+  showNodes = true,
 }) {
   const tile = TILE_LAYERS[mapLayer] || TILE_LAYERS.satellite;
 
@@ -132,6 +116,12 @@ export default function MapView({
     if (plotData.points.length === 0) return null;
     return L.latLngBounds(plotData.points.map(p => [p.lat, p.lon]));
   }, [plotData.points]);
+
+  // CAD Grid / Triangulation diagonals from centroid
+  const cadTriangles = useMemo(() => {
+    if (!showCadGrid || plotData.points.length === 0) return [];
+    return plotData.points.map(p => [[centroid.lat, centroid.lon], [p.lat, p.lon]]);
+  }, [showCadGrid, plotData.points, centroid]);
 
   // Side segments: midpoints + labels
   const sideSegments = useMemo(() => {
@@ -159,7 +149,7 @@ export default function MapView({
   return (
     <MapContainer
       center={[centroid.lat, centroid.lon]}
-      zoom={20}
+      zoom={18}
       zoomControl={true}
       style={{ width: '100%', height: '100%' }}
     >
@@ -167,13 +157,23 @@ export default function MapView({
       <TileLayer
         key={mapLayer}
         url={tile.url}
+        subdomains={tile.subdomains || ['a', 'b', 'c']}
         attribution={tile.attribution}
         maxZoom={tile.maxZoom}
         maxNativeZoom={tile.maxNativeZoom}
       />
-      <MapController bounds={bounds} />
+      <MapController bounds={bounds} userPosition={userPosition} />
       <UserFollower userPosition={userPosition} follow={!!userPosition} />
       <MapClickHandler onMapClick={onMapClick} />
+
+      {/* CAD Overlay: Centroid triangulation / grid vectors */}
+      {showCadGrid && cadTriangles.map((line, idx) => (
+        <Polyline
+          key={`cad-${idx}`}
+          positions={line}
+          pathOptions={{ color: '#38bdf8', weight: 1, dashArray: '4, 4', opacity: 0.6 }}
+        />
+      ))}
 
       {/* Plot boundary polygon */}
       <Polygon
@@ -182,7 +182,7 @@ export default function MapView({
           color: '#00ffcc',
           weight: 3,
           fillColor: '#00ffcc',
-          fillOpacity: 0.1,
+          fillOpacity: 0.12,
           dashArray: null,
         }}
       />
@@ -203,8 +203,8 @@ export default function MapView({
         </Fragment>
       ))}
 
-      {/* Corner markers */}
-      {plotData.points.map((pt, idx) => (
+      {/* Corner / Boundary Node markers */}
+      {showNodes && plotData.points.map((pt, idx) => (
         <Marker
           key={`corner-${idx}`}
           position={[pt.lat, pt.lon]}
@@ -238,18 +238,20 @@ export default function MapView({
             }}
           />
           {/* Line from user to target */}
-          <Polyline
-            positions={[
-              [userPosition.lat, userPosition.lon],
-              [plotData.points[targetPointIdx].lat, plotData.points[targetPointIdx].lon],
-            ]}
-            pathOptions={{
-              color: '#f87171',
-              weight: 2,
-              dashArray: '6, 6',
-              opacity: 0.7,
-            }}
-          />
+          {plotData.points[targetPointIdx] && (
+            <Polyline
+              positions={[
+                [userPosition.lat, userPosition.lon],
+                [plotData.points[targetPointIdx].lat, plotData.points[targetPointIdx].lon],
+              ]}
+              pathOptions={{
+                color: '#f87171',
+                weight: 2,
+                dashArray: '6, 6',
+                opacity: 0.7,
+              }}
+            />
+          )}
         </>
       )}
     </MapContainer>

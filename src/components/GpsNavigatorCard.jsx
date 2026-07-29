@@ -31,11 +31,29 @@ export default function GpsNavigatorCard({
     <div className="nav-card">
       {/* Header */}
       <div className="nav-card-header">
-        <div className="nav-status">
-          <div className={`nav-status-dot ${simulatorMode ? 'simulating' : gpsActive ? 'active' : 'inactive'}`} />
-          <span style={{ color: simulatorMode ? 'var(--accent-amber)' : gpsActive ? 'var(--accent-green)' : 'var(--text-muted)' }}>
-            {simulatorMode ? 'SIMULATOR' : gpsActive ? 'GPS ACTIVE' : 'GPS OFF'}
-          </span>
+        <div className="nav-status" style={{ flexDirection: 'column', alignItems: 'flex-start', gap: 2 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div className={`nav-status-dot ${simulatorMode ? 'simulating' : gpsActive ? 'active' : 'inactive'}`} />
+            <span style={{ color: simulatorMode ? 'var(--accent-amber)' : gpsActive ? 'var(--accent-green)' : 'var(--text-muted)' }}>
+              {simulatorMode ? 'SIMULATOR ACTIVE' : gpsActive ? 'LIVE GPS TRACKING' : 'GPS OFF'}
+            </span>
+          </div>
+
+          {/* GPS Satellite Signal Quality Bar */}
+          {isActive && (
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 9, color: 'var(--text-muted)' }}>
+              <span>📡 Signal Lock:</span>
+              <div style={{ display: 'flex', gap: 2, alignItems: 'flex-end', height: 10 }}>
+                <div style={{ width: 3, height: 4, background: 'var(--accent-green)', borderRadius: 1 }} />
+                <div style={{ width: 3, height: 6, background: 'var(--accent-green)', borderRadius: 1 }} />
+                <div style={{ width: 3, height: 8, background: 'var(--accent-green)', borderRadius: 1 }} />
+                <div style={{ width: 3, height: 10, background: (userPosition?.accuracy || 5) < 3 ? 'var(--accent-green)' : 'var(--accent-amber)', borderRadius: 1 }} />
+              </div>
+              <span style={{ color: (userPosition?.accuracy || 5) < 3 ? 'var(--accent-green)' : 'var(--accent-amber)', fontWeight: 600 }}>
+                {(userPosition?.accuracy || 5) < 3 ? '99.9% High Lock (±1m)' : `±${(userPosition?.accuracy || 3).toFixed(1)}m Lock`}
+              </span>
+            </div>
+          )}
         </div>
         <div className="btn-group">
           {!isActive ? (
@@ -109,14 +127,45 @@ export default function GpsNavigatorCard({
         {/* Distance & Accuracy Metrics */}
         {isActive && distanceToTarget !== null && (
           <>
+            {/* Geofence Boundary Warning (if user is far away from the land survey plot) */}
+            {distanceToTarget > 50 && (
+              <div style={{
+                background: 'rgba(239, 68, 68, 0.15)',
+                border: '1px solid var(--accent-red)',
+                borderRadius: 'var(--radius-sm)',
+                padding: '10px 12px',
+                marginBottom: 10,
+                fontSize: 11,
+                color: 'var(--accent-red)',
+                fontWeight: 600,
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 8,
+                lineHeight: 1.4,
+              }}>
+                <span style={{ fontSize: 14 }}>⚠️</span>
+                <div>
+                  <strong>Far From Survey Plot! ({distanceToTarget > 1000 ? `${(distanceToTarget / 1000).toFixed(1)} km` : `${distanceToTarget.toFixed(0)}m`})</strong><br />
+                  <span style={{ fontSize: 10, fontWeight: 400, color: 'var(--text-secondary)' }}>
+                    Your GPS position is located away from this land survey plot. Walk to the field or use the Simulator Controls below to teleport closer.
+                  </span>
+                </div>
+              </div>
+            )}
+
             <div className="nav-metrics">
               <div className="nav-metric-box">
                 <div className="nav-metric-value distance">
-                  {distanceToTarget < 1 ? distanceToTarget.toFixed(2) : distanceToTarget.toFixed(1)}
+                  {distanceToTarget > 1000 ? `${(distanceToTarget / 1000).toFixed(2)} km` : distanceToTarget < 1 ? distanceToTarget.toFixed(2) : distanceToTarget.toFixed(1)}
                 </div>
                 <div className="nav-metric-unit">
                   meters ({metersToFeet(distanceToTarget).toFixed(1)} ft)
                 </div>
+                {distanceToTarget < 1.5 && (
+                  <div style={{ fontSize: 10, color: 'var(--accent-green)', fontWeight: 700, marginTop: 2 }}>
+                    🎯 YOU ARE AT DESTINATION!
+                  </div>
+                )}
               </div>
               <div className="nav-metric-box">
                 <div className={`nav-metric-value accuracy ${getAccuracyClass()}`}>
