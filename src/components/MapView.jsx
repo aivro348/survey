@@ -4,14 +4,21 @@ import L from 'leaflet';
 import 'leaflet/dist/leaflet.css';
 import { haversineDistance } from '../utils/geoUtils';
 
-// Esri World Imagery (Latest High-Resolution Satellite Map Layer)
+// Pure High-Resolution Satellite Map Layers
 const TILE_LAYERS = {
   satellite: {
     url: 'https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-    attribution: 'Tiles &copy; Esri World Imagery (Latest HD 30cm)',
+    attribution: 'Tiles &copy; Esri World Imagery (30cm Resolution)',
     maxZoom: 22,
-    maxNativeZoom: 19,
+    maxNativeZoom: 18, // Native Esri zoom level cap to prevent 'Map data not yet available'
   },
+  google_sat: {
+    url: 'https://{s}.google.com/vt/lyrs=s&x={x}&y={y}&z={z}',
+    subdomains: ['mt0', 'mt1', 'mt2', 'mt3'],
+    attribution: '&copy; Google Satellite HD (Sub-meter ground detail)',
+    maxZoom: 22,
+    maxNativeZoom: 20, // Google has deeper high-resolution native tile coverage in India
+  }
 };
 
 // Corner marker icon factory

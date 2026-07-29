@@ -473,8 +473,14 @@ export default function App() {
           <div className="map-overlay top-left">
             <div className="layer-switcher">
               <div style={{ padding: '6px 12px', fontSize: 11, fontWeight: 600, color: 'var(--accent-cyan)', display: 'flex', alignItems: 'center', gap: 6 }}>
-                🛰️ Esri Latest HD Satellite (30cm)
+                🛰️ Satellite HD Layer:
               </div>
+              <button className={`layer-btn ${mapLayer === 'satellite' ? 'active' : ''}`} onClick={() => setMapLayer('satellite')}>
+                Esri Satellite
+              </button>
+              <button className={`layer-btn ${mapLayer === 'google_sat' ? 'active' : ''}`} onClick={() => setMapLayer('google_sat')}>
+                Google Satellite
+              </button>
               <div style={{ height: 16, width: 1, background: 'rgba(255,255,255,0.2)', margin: '0 4px' }} />
               <button className={`layer-btn ${showCadGrid ? 'active' : ''}`} onClick={() => setShowCadGrid(!showCadGrid)}>
                 📐 CAD Grid
